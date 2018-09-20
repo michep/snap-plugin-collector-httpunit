@@ -66,6 +66,13 @@ func (p *Plugin) CollectMetrics(mts []plugin.Metric) ([]plugin.Metric, error) {
 
 	var m plugin.Metric
 	var healthdata, timedata int
+	var ip string
+	type resStruct struct {
+		data  interface{}
+		label string
+		ip    string
+	}
+	resMap := map[string][]resStruct{}
 	for r := range resCh {
 		if r.Result.GotCode && r.Result.GotRegex && r.Result.GotText {
 			healthdata = 0
@@ -74,23 +81,26 @@ func (p *Plugin) CollectMetrics(mts []plugin.Metric) ([]plugin.Metric, error) {
 			healthdata = 1
 			timedata = 0
 		}
-		m = plugin.Metric{
-			Namespace: createNamespace("time"),
-			Timestamp: ts,
-			Data:      timedata,
+		ip = r.Case.IP.String()
+		if ip == "<nil>" {
+			ip = "NA"
 		}
-		m.Namespace[2].Value = r.Plan.Label
-		metrics = append(metrics, m)
-
-		m = plugin.Metric{
-			Namespace: createNamespace("health"),
-			Timestamp: ts,
-			Data:      healthdata,
-		}
-		m.Namespace[2].Value = r.Plan.Label
-		metrics = append(metrics, m)
+		resMap["time"] = append(resMap["time"], resStruct{data: timedata, label: r.Plan.Label, ip: ip})
+		resMap["health"] = append(resMap["health"], resStruct{data: healthdata, label: r.Plan.Label, ip: ip})
 	}
-
+	for _, metric := range mts {
+		name := metric.Namespace[4].Value
+		for _, res := range resMap[name] {
+			m = plugin.Metric{
+				Namespace: createNamespace(name),
+				Timestamp: ts,
+				Data:      res.data,
+			}
+			m.Namespace[2].Value = res.label
+			m.Namespace[3].Value = res.ip
+			metrics = append(metrics, m)
+		}
+	}
 	return metrics, nil
 }
 
@@ -110,6 +120,7 @@ func (p *Plugin) getPlansFromConfig(filename string) error {
 func createNamespace(name string) plugin.Namespace {
 	namespace := plugin.NewNamespace(PluginVedor, PluginName)
 	namespace = namespace.AddDynamicElement("resource", "resource name")
+	namespace = namespace.AddDynamicElement("ip", "ip address")
 	namespace = namespace.AddStaticElement(name)
 	return namespace
 }
